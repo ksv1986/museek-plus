@@ -23,15 +23,31 @@
 #endif // HAVE_CONFIG_H
 #include "configmanager.h"
 #include <NewNet/nnlog.h>
-#include <libxml/parser.h>
-#include <libxml/tree.h>
 #include <cstring>
+#include <fstream>
+
+namespace
+{
+
+inline void
+ltrim(std::string& s)
+{
+  s.erase(s.begin(), std::find_if(s.begin(), s.end(), [](char ch) {
+    return !std::isspace(ch);
+  }));
+}
+
+inline void
+rtrim(std::string& s) {
+  s.erase(std::find_if(s.rbegin(), s.rend(), [](char ch) {
+    return !std::isspace(ch);
+  }).base(), s.end());
+}
+
+}
 
 Museek::ConfigManager::ConfigManager() : m_AutoSave(true)
 {
-  /* Check if the libxml we linked against when ConfigManager was compiled
-     is compatible with the libxml version we're linked against at runtime. */
-  LIBXML_TEST_VERSION;
 }
 
 bool
@@ -40,10 +56,10 @@ Museek::ConfigManager::load(const std::string & path)
   NNLOG("museekd.config.debug", "Loading configuration '%s'.", path.c_str());
 
   // Load and parse the specified configuration file.
-  xmlDoc * doc = xmlReadFile(path.c_str(), 0, 0);
-  if(! doc)
+  std::ifstream f(path);
+  if(!f.is_open())
   {
-    NNLOG("museekd.config.warn", "Could not parse configuration file '%s'.", path.c_str());
+    NNLOG("museekd.config.warn", "Could not open configuration file '%s'.", path.c_str());
     return false;
   }
 
@@ -53,72 +69,43 @@ Museek::ConfigManager::load(const std::string & path)
   bool oldAutoSave = m_AutoSave;
   setAutoSave(false);
 
-  // Get the root element.
-  xmlNode * rootIter = xmlDocGetRootElement(doc);
-  for(; rootIter; rootIter = rootIter->next)
-  {
-    // Check the root element (should be a <museekd> element).
-    if((rootIter->type != XML_ELEMENT_NODE) || (strcmp((const char *)rootIter->name, "museekd") != 0))
+  std::string domain;
+  int number = 0;
+  for(std::string line; std::getline(f, line);) {
+    ++number;
+    ltrim(line);
+    if(line.empty())
       continue;
-    // Iterate over the root element's children. Domains live there.
-    for(xmlNode * domainIter = rootIter->children; domainIter; domainIter = domainIter->next)
+    if(line.front() == '#' || line.front() == ';')
+      continue;
+
+    rtrim(line);
+    if(line.front() == '[' && line.back() == ']') {
+      // Get the domain from section string
+      domain = line.substr(1, line.size()-2);
+    }
+    else
     {
-      // Domains are <domain> elements.
-      if((domainIter->type != XML_ELEMENT_NODE) || (strcmp((const char *)domainIter->name, "domain") != 0))
-        continue;
-
-      // Get the domain id property.
-      xmlChar * id = xmlGetProp(domainIter, (const xmlChar *)"id");
-      if(! id)
-      {
-        NNLOG("museekd.config.warn", "Domain without id encountered in config file.");
+      // Otherwise add key=val pair
+      if(domain.empty()) {
+        NNLOG("museekd.config.warn", "Line %d without domain: %s", number, line.c_str());
+      }
+      std::string::size_type n = line.find('=');
+      if(n == std::string::npos) {
+        NNLOG("museek.muconf", "Line %d does't have '=': %s", number, line.c_str());
         continue;
       }
-      std::string domain((const char *)id);
-      xmlFree(id);
+      std::string key = line.substr(0, n);
+      std::string val = line.substr(n + 1);
+      rtrim(key);
+      ltrim(val);
 
-      // Iterator over the domain element's children. Keys live there.
-      for(xmlNode * keyIter = domainIter->children; keyIter; keyIter = keyIter->next)
-      {
-        // A key is a <key> element.
-        if((keyIter->type != XML_ELEMENT_NODE) || (strcmp((const char *)keyIter->name, "key") != 0))
-          continue;
-
-        // Get the key's id property.
-        xmlChar * id = xmlGetProp(keyIter, (const xmlChar *)"id");
-        if(! id)
-        {
-          NNLOG("museekd.config.warn", "Key without id encountered in config file.");
-          continue;
-        }
-        std::string key((const char *)id);
-        xmlFree(id);
-
-        // The data of the key is its value.
-        xmlChar * data = xmlNodeListGetString(doc, keyIter->children, true);
-        if(data)
-        {
-          set(domain, key, (const char *)data);
-          xmlFree(data);
-        }
-        else
-        {
-          // No data, no value.
-          set(domain, key, "");
-        }
-      }
+      set(domain, key, val);
     }
   }
 
   // Restore the auto-save state.
   setAutoSave(oldAutoSave);
-
-  // Clean up xml things.
-  xmlFreeDoc(doc);
-  xmlCleanupParser();
-
-  // See if we need to update the config file
-  updateConfigFile();
 
   return true;
 }
@@ -127,76 +114,30 @@ bool
 Museek::ConfigManager::save(const std::string & path) const
 {
   // Check if we know where to save the configuration.
-  if(path.empty() && m_Path.empty())
+  const std::string& dest = path.empty() ? m_Path : path;
+  if(dest.empty())
   {
     NNLOG("museekd.config.warn", "No path to save configuration to specified.");
     return false;
   }
 
-  NNLOG("museekd.config.config.debug", "Saving configuration to '%s'.", path.empty() ? m_Path.c_str() : path.c_str());
+  NNLOG("museekd.config.config.debug", "Saving configuration to '%s'.", dest.c_str());
 
-  // Build the xml document.
-  xmlDocPtr doc = xmlNewDoc((const xmlChar *)"1.0");
-  // Create and set the root node (<museekd>).
-  xmlNodePtr rootNode = xmlNewNode(NULL, (const xmlChar *)"museekd");
-  xmlDocSetRootElement(doc, rootNode);
-
-  // Iterate over the domains.
-  Config::const_iterator it, end = m_Config.end();
-  for(it = m_Config.begin(); it != end; ++it)
+  std::ofstream f(dest);
+  if(!f.is_open())
   {
-    // Create a <domain> element for this domain.
-    xmlNodePtr domainNode = xmlNewChild(rootNode, NULL, (const xmlChar *)"domain", NULL);
-    // Set the id property of the domain element.
-    xmlNewProp(domainNode, (const xmlChar *)"id", (const xmlChar *)(*it).first.c_str());
-    // Iterate over the domain's keys.
-    Domain::const_iterator it2, end2 = (*it).second.end();
-    for(it2 = (*it).second.begin(); it2 != end2; ++it2)
-    {
-      xmlNodePtr keyNode;
-      /* If the key has a value, create a new key node with the appropriate
-         value. */
-      if(! (*it2).second.empty())
-        keyNode = xmlNewChild(domainNode, NULL, (const xmlChar *)"key", (const xmlChar *)(*it2).second.c_str());
-      else
-        keyNode = xmlNewChild(domainNode, NULL, (const xmlChar *)"key", NULL);
-      // Set the key's id property.
-      xmlNewProp(keyNode, (const xmlChar *)"id", (const xmlChar *)(*it2).first.c_str());
-    }
+    NNLOG("museekd.config.warn", "Unable to save configuration to '%s'.", dest.c_str());
+    return false;
   }
 
-  // Save the xml document.
-  xmlSaveFormatFileEnc(path.empty() ? m_Path.c_str() : path.c_str(), doc, "UTF-8", 1);
-
-  // Clean up.
-  xmlFreeDoc(doc);
-  xmlCleanupParser();
-
+  for(const auto& domain : m_Config)
+  {
+    f << "[" << domain.first << "]\n";
+    for (const auto& kv : domain.second)
+      f << kv.first << "=" << kv.second << "\n";
+    f << "\n";
+  }
   return true;
-}
-
-/**
-  * Update config.xml
-  */
-void
-Museek::ConfigManager::updateConfigFile() {
-    std::string version = get("museekd", "version", "none");
-
-    if (version == "none") {
-        // Probably updating from 0.1.13 or previous
-
-        // Switching to the new server
-        std::string host = get("server", "host");
-        uint port = getUint("server", "port");
-        if ((host == "server.slsknet.org") && (port != 2242))
-            set("server", "port", 2242);
-    }
-    else if (version == "0.2.0") {
-        // Nothing special to do.
-        // One new config key: "priv_rooms"/"enable_priv_room" -> false if not present
-    }
-    // Setting the new version
-    set("museekd", "version", "0.4.0");
 }
 
 std::string

@@ -135,11 +135,11 @@ int main(int argc, char ** argv)
   std::string version("museekd :: Version 0.4.0 :: Museek Daemon Plus");
 
 #ifndef WIN32
-  /* Load the configuration from ~/.museekd/config.xml. */
-  std::string configPath(std::string(getenv("HOME")) + "/.museekd/config.xml");
+  /* Load the configuration from ~/.museekd/config.ini. */
+  std::string configPath(std::string(getenv("HOME")) + "/.museekd/config.ini");
 #else
-  /* Load the configuration from %APPDIR%\Museekd\config.xml. */
-  std::string configPath(getConfigPath("Museekd") + "\\config.xml");
+  /* Load the configuration from %APPDIR%\Museekd\config.ini. */
+  std::string configPath(getConfigPath("Museekd") + "\\config.ini");
 #endif // WIN32
 
     bool fullDebug = false;

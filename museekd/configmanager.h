@@ -128,9 +128,6 @@ namespace Museek
     /* Helper function to easily emit a key set event. */
     void emitKeySetEvent(const std::string & key, const std::string & domain, const std::string & value);
 
-    /* Update config.xml */
-    void updateConfigFile();
-
     /* Wether auto-save is enabled. */
     bool m_AutoSave;
     /* Path to the last loaded configuration file. */

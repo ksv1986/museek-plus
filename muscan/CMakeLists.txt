@@ -3,8 +3,6 @@ project(Tools CXX)
 find_package(FAM)
 
 include(FindPkgConfig REQUIRED)
-pkg_search_module(LIBXMLPP "libxml++-2.6")
-add_definitions(${LIBXMLPP_CFLAGS})
 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
 

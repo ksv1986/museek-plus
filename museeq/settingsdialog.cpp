@@ -1668,7 +1668,7 @@ void SettingsDialog::slotError(QAbstractSocket::SocketError e) {
 
 void SettingsDialog::selectConfig() {
     QDir dir = QDir::home();
-    QFileDialog * fd = new QFileDialog(this, tr("Select a museek daemon config file"), dir.path()+"/.museekd", "Museek daemon config (*.xml)");
+    QFileDialog * fd = new QFileDialog(this, tr("Select a museek daemon config file"), dir.path()+"/.museekd", "Museek daemon config (*.ini)");
     fd->setFileMode(QFileDialog::ExistingFile);
     if(fd->exec() == QDialog::Accepted && ! fd->selectedFiles().isEmpty())
         mMuseekConfigFile->setText(fd->selectedFiles().at(0));

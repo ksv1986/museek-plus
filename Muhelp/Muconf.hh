@@ -24,7 +24,6 @@
 #include <string>
 #include <map>
 #include <vector>
-#include <libxml++/libxml++.h>
 
 class MuconfDomain;
 class Muconf;
@@ -32,9 +31,8 @@ class Muconf;
 class MuconfKey {
 public:
 	MuconfKey() { };
-	MuconfKey(const std::string&);
+	explicit MuconfKey(const std::string&);
 
-	
 	MuconfDomain* domain() const;
 	
 	uint asUint() const;
@@ -62,13 +60,12 @@ private:
 class MuconfDomain {
 public:
 	MuconfDomain() : mDomain("") { };
-	MuconfDomain(const std::string&);
+	explicit MuconfDomain(const std::string&);
 
 	std::string domain() const;
-	
-	void store(xmlpp::Element*) const;
-	void restore(const xmlpp::Element*);
-	
+
+	void restore(const std::string& key, const std::string& value);
+
 	bool hasKey(const std::string&) const;
 	std::vector<std::string> keys() const;
 	
@@ -76,7 +73,7 @@ public:
 	
 	MuconfKey& operator[](const std::string&);
 	operator std::map<std::string, std::string>() const;
-	
+
 private:
 	std::string mDomain;
 	std::map<std::string, MuconfKey> mKeys;
@@ -85,13 +82,11 @@ private:
 
 class Muconf {
 public:
-	Muconf();
-	Muconf(const std::string&);
-
-	std::string filename() const;
+	Muconf() = default;
+	explicit Muconf(const std::string&);
 
 	void store();
-	void restore(const xmlpp::Element*);
+	void restore();
 	
 	bool hasDomain(const std::string&) const;
 	std::vector<std::string> domains() const;

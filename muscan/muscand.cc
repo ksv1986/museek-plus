@@ -333,7 +333,7 @@ int main(int argc, char **argv)
 		return -1;
 	}
 #endif
-	string config_file = string(getenv("HOME")) + "/.museekd/config.xml";
+	string config_file = string(getenv("HOME")) + "/.museekd/config.ini";
 	bool doBuddy = false;
 	bool doReload = true;
 	for(int i = 1; i < argc; i++) {

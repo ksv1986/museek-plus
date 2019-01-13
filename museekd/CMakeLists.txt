@@ -4,11 +4,6 @@ project(museekd CXX)
 find_package(ZLIB REQUIRED)
 include_directories(${ZLIB_INCLUDE_DIR})
 
-# Find LibXml2
-find_package(LibXml2 REQUIRED)
-include_directories(${LIBXML2_INCLUDE_DIR})
-add_definitions(${LIBXML2_DEFINITIONS})
-
 # Check for some OS specific libraries
 set(OS_LIBRARIES "")
 if(WIN32 AND NOT CYGWIN)
@@ -37,7 +32,6 @@ target_link_libraries(
     Muhelp
     ${NEWNET_LIBRARIES}
     ${ZLIB_LIBRARIES}
-    ${LIBXML2_LIBRARIES}
     ${ICONV_LIBRARIES}
     ${OS_LIBRARIES}
     )

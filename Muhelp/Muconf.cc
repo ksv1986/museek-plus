@@ -22,35 +22,36 @@
 
 #include <Muhelp/Muconf.hh>
 
-#include <libxml++/libxml++.h>
 #include <Muhelp/string_ext.hh>
 #include <NewNet/nnlog.h>
 
-Muconf::Muconf() { };
+#include <fstream>
+#include <string>
+#include <algorithm>
+#include <cctype>
+
+namespace
+{
+
+inline void ltrim(std::string& s)
+{
+	s.erase(s.begin(), std::find_if(s.begin(), s.end(), [](char ch) {
+		return !std::isspace(ch);
+	}));
+}
+
+inline void rtrim(std::string& s) {
+	s.erase(std::find_if(s.rbegin(), s.rend(), [](char ch) {
+		return !std::isspace(ch);
+	}).base(), s.end());
+}
+
+}
 
 Muconf::Muconf(const std::string& filename)
         : mFilename(filename) {
 	NNLOG("museek.muconf", "Muconf %s", filename.c_str());
-	
-	try {
-		xmlpp::DomParser parser;
-		parser.set_substitute_entities();
-		parser.parse_file(mFilename);
-		if(parser) {
-			xmlpp::Element* root = parser.get_document()->get_root_node();
-			if(root->get_name() != "museekd") {
-				NNLOG("museek.muconf", "Invalid configuration database, root element name mismatch");
-				return;
-			}
-			restore(parser.get_document()->get_root_node());
-		}
-	} catch(const std::exception& ex) {
-		NNLOG("museek.muconf", "Exception (%s) caught while parsing configuration database", ex.what());
-	}
-}
-
-std::string Muconf::filename() const {
-	return mFilename;
+	restore();
 }
 
 bool Muconf::hasDomain(const std::string& domain) const {
@@ -83,48 +84,56 @@ MuconfDomain& Muconf::operator[](const std::string& domain) {
 	return mDomains[domain];
 }
 
-void Muconf::restore(const xmlpp::Element* root) {
+void Muconf::restore() {
 	NNLOG("museek.muconf", "restore <...>");
-	
-	const xmlpp::Node::NodeList nodes = root->get_children("domain");
-	xmlpp::Node::NodeList::const_iterator it = nodes.begin();
-	for(; it != nodes.end(); ++it) {
-		const xmlpp::Element* elem = dynamic_cast<const xmlpp::Element*>(*it);
-		if(! elem) {
-			NNLOG("museek.muconf", "Domain node is not an element");
+
+	MuconfDomain* cur = nullptr;
+	std::ifstream f(mFilename);
+	for(std::string line; std::getline(f, line);) {
+		ltrim(line);
+		if(line.empty())
 			continue;
-		}
-		xmlpp::Attribute* attr = elem->get_attribute("id");
-		if(! attr) {
-			NNLOG("museek.muconf", "Domain is missing id attribute");
+		if(line.front() == '#' || line.front() == ';')
 			continue;
+
+		rtrim(line);
+		if(line.front() == '[' && line.back() == ']') {
+			std::string domain = line.substr(1, line.size()-2);
+			if(mDomains.find(domain) == mDomains.end())
+				mDomains[domain] = MuconfDomain(domain);
+
+			cur = &mDomains[domain];
+		} else {
+			if(!cur) {
+				NNLOG("museek.muconf", "Line without domain: %s", line.c_str());
+				continue;
+			}
+
+			std::string::size_type n = line.find('=');
+			if(n == std::string::npos) {
+				NNLOG("museek.muconf", "Line does't have '=': %s", line.c_str());
+				continue;
+			}
+			std::string key = line.substr(0, n);
+			std::string val = line.substr(n + 1);
+			rtrim(key);
+			ltrim(val);
+
+			cur->restore(key, val);
 		}
-		const std::string& domain = attr->get_value();
-		if(mDomains.find(domain) == mDomains.end())
-			mDomains[domain] = MuconfDomain(domain);
-		mDomains[domain].restore(elem);
 	}
 }
 
 void Muconf::store() {
 	NNLOG("museek.muconf", "store");
-	
-	xmlpp::Document doc;
-	xmlpp::Element* root = doc.create_root_node("museekd");
-	std::map<std::string,MuconfDomain>::const_iterator it = mDomains.begin();
-	for(; it != mDomains.end(); ++it) {
-		root->add_child_text("\n  ");
-		xmlpp::Element* node = root->add_child("domain");
-		node->set_attribute("id", (*it).first);
-		(*it).second.store(node);
-		node->add_child_text("\n  ");
-		
-	}
-	root->add_child_text("\n");
-	try {
-		doc.write_to_file(mFilename);
-	} catch(const std::exception& ex) {
-		NNLOG("museek.muconf", "Exception (%s) caught while writing configuration database to disk", ex.what());
+
+	std::ofstream f(mFilename);
+	for (const auto& domain : mDomains) {
+		f << "[" << domain.first << "]\n";
+		const std::map<std::string, std::string>& m = domain.second;
+		for (const auto& kv : m)
+			f << kv.first << "=" << kv.second << "\n";
+		f << "\n";
 	}
 }
 
@@ -138,7 +147,7 @@ Muconf::operator std::map<std::string, std::map<std::string, std::string> >() co
 		r[(*it).first] = (*it).second;
 	
 	return r;
-}	
+}
 
 #undef MULOG_DOMAIN
 #define MULOG_DOMAIN "Muconf.ND"
@@ -178,47 +187,11 @@ MuconfKey& MuconfDomain::operator[](const std::string& key) {
 	return mKeys[key];
 }
 
-void MuconfDomain::restore(const xmlpp::Element* root) {
-	NNLOG("museek.muconf", "restore <...>");
-	
-	const xmlpp::Node::NodeList nodes = root->get_children("key");
-	xmlpp::Node::NodeList::const_iterator it = nodes.begin();
-	for(; it != nodes.end(); ++it) {
-		const xmlpp::Element* elem = static_cast<const xmlpp::Element*>(*it);
-		if(! elem) {
-			NNLOG("museek.muconf", "Key node is not an element (domain: %s)", mDomain.c_str());
-			continue;
-		}
-		xmlpp::Attribute* attr = elem->get_attribute("id");
-		if(! attr) {
-			NNLOG("museek.muconf", "Key is missing id attribute (domain %s)", mDomain.c_str());
-			continue;
-		}
-		std::string key = attr->get_value();
-		const xmlpp::TextNode* text = elem->get_child_text();
-		if(mKeys.find(key) == mKeys.end())
-			mKeys[key] = MuconfKey(key);
-		if(text)
-			mKeys[key] = text->get_content();
-		else
-			mKeys[key] = "";
-	}	
-}
+void MuconfDomain::restore(const std::string& key, const std::string& val) {
+	if(mKeys.find(key) == mKeys.end())
+		mKeys[key] = MuconfKey(key);
 
-void MuconfDomain::store(xmlpp::Element* root) const {
-	NNLOG("museek.muconf", "store <...>");
-	
-	std::map<std::string, MuconfKey>::const_iterator it = mKeys.begin();
-	for(; it != mKeys.end(); ++it) {
-		if((*it).first == "")
-			continue;
-		const std::string& value = (*it).second;
-		root->add_child_text("\n    ");
-		xmlpp::Element* node = root->add_child("key");
-		node->set_attribute("id", (*it).first);
-		if(value != "")
-			node->set_child_text(value);
-	}
+	mKeys[key] = val;
 }
 
 MuconfDomain::operator std::map<std::string, std::string>() const {
